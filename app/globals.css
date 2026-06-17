@@ -9,8 +9,14 @@
   --border: #27272f;
   --text: #e4e4e7;
   --text-muted: #71717a;
-  --accent: #6366f1;
-  --accent-hover: #818cf8;
+
+  /* RawTree brand */
+  --rt-blue: #1b83fe;
+  --rt-indigo: #5f68fa;
+  --accent: #1b83fe;
+  --accent-hover: #4d9ffe;
+  --accent-gradient: linear-gradient(135deg, #1b83fe, #5f68fa);
+
   --pass: #22c55e;
   --fail: #ef4444;
 }
@@ -27,7 +33,6 @@ body {
   margin: 0;
 }
 
-/* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

@@ -414,13 +414,13 @@ export default function BenchmarkPage() {
         style={{ background: 'var(--bg)' }}
       >
         <div className="flex items-center gap-2.5">
-          <span className="text-[var(--accent)] text-lg">⚡</span>
+          <img src="/rawtree-mark.svg" alt="RawTree" className="h-7 w-auto" />
           <span className="font-semibold text-[var(--text)] tracking-tight">
-            Harness Benchmark
+            Benchmark
           </span>
         </div>
         <span className="text-xs text-[var(--text-muted)] hidden sm:block">
-          Compare AI coding agents across harnesses, models, and sandboxes
+          Compare AI coding agents · traces land in RawTree automatically
         </span>
         {runCount > 0 && (
           <div className="ml-auto flex items-center gap-3 text-xs text-[var(--text-muted)]">
@@ -474,17 +474,21 @@ export default function BenchmarkPage() {
               />
 
               <div className="border-t border-[var(--border)] pt-4 space-y-1.5">
-                <KeyField
-                  label="RawTree API Key"
-                  badge="optional"
-                  value={config.rawtreeKey}
-                  onChange={(v) => update('rawtreeKey', v)}
-                  placeholder="rt_…"
-                />
-                <p className="text-xs text-[var(--text-muted)] leading-relaxed pt-0.5">
-                  Benchmark traces are automatically indexed in your RawTree project.
-                  No tables to create — just add your key.
-                </p>
+                <div className="rounded-md border border-[var(--rt-blue)]/30 bg-[var(--rt-blue)]/5 p-3 space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <img src="/rawtree-mark.svg" alt="RawTree" className="h-4 w-auto" />
+                    <span className="text-xs font-semibold text-[var(--rt-blue)]">RawTree</span>
+                  </div>
+                  <KeyField
+                    label="API Key"
+                    value={config.rawtreeKey}
+                    onChange={(v) => update('rawtreeKey', v)}
+                    placeholder="rt_…"
+                  />
+                  <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                    Traces land in your project automatically. No tables to create.
+                  </p>
+                </div>
               </div>
             </div>
           </Section>
@@ -594,17 +598,17 @@ export default function BenchmarkPage() {
           {runCount === 0 && (
             <div className="flex-1 flex items-center justify-center">
               <div className="text-center space-y-3 max-w-sm px-4">
-                <div className="text-4xl">⚡</div>
+                <img src="/rawtree-mark.svg" alt="RawTree" className="h-14 w-auto mx-auto opacity-80" />
                 <h2 className="text-lg font-semibold text-[var(--text)]">
                   Ready to benchmark
                 </h2>
                 <p className="text-sm text-[var(--text-muted)] leading-relaxed">
-                  Enter your API keys, select a scenario and harness, then click{' '}
-                  <strong className="text-[var(--text)]">Run Benchmark</strong> to start.
+                  Select a scenario and harness, then click{' '}
+                  <strong className="text-[var(--text)]">Run Benchmark</strong>. Rich OTel traces
+                  appear in your RawTree project automatically — no tables to create.
                 </p>
                 <p className="text-xs text-[var(--text-muted)]">
-                  Keys are stored in your browser only — never sent to any server except the model
-                  providers.
+                  API keys are stored in your browser only.
                 </p>
               </div>
             </div>

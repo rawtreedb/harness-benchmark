@@ -2,8 +2,9 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Harness Benchmark',
-  description: 'Compare AI coding agents across harnesses, models, and sandboxes',
+  title: 'RawTree Benchmark',
+  description: 'Compare AI coding agents across harnesses, models, and sandboxes — traces in RawTree automatically',
+  icons: { icon: '/favicon.svg' },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
