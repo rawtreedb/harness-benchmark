@@ -1,0 +1,36 @@
+{
+  "name": "harness-sandbox-benchmark",
+  "version": "0.1.0",
+  "description": "Benchmark AI coding agents (Claude Code, Codex) across harnesses, models, and sandboxes. Includes a local web UI.",
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "bench": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json"
+  },
+  "dependencies": {
+    "@ai-sdk/harness": "^1.0.0-canary.13",
+    "@ai-sdk/harness-claude-code": "^1.0.0-canary.9",
+    "@ai-sdk/harness-codex": "^1.0.0-canary.9",
+    "@opentelemetry/api": "^1.9.0",
+    "ai": "^7.0.0-canary.176",
+    "next": "^15.3.3",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.0.0",
+    "autoprefixer": "^10.4.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}
