@@ -52,6 +52,16 @@ const SCENARIOS = [
     label: 'Incident Triage',
     description: 'On-call checkout latency investigation with tools',
   },
+  {
+    id: 'cost-spike',
+    label: 'Cost Spike',
+    description: 'Cloud billing alert — identify idle GPU instances driving runaway spend',
+  },
+  {
+    id: 'slow-query',
+    label: 'Slow Query',
+    description: 'Find the missing index causing 4s full table scans on 8M rows',
+  },
 ];
 
 const CLAUDE_MODELS = [

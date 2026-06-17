@@ -162,3 +162,149 @@ export const tools = {
   fetch_status_page: fetchStatusPageTool,
   search_github_issues: searchGitHubIssuesTool,
 };
+
+// ---------------------------------------------------------------------------
+// Cost spike tools
+// ---------------------------------------------------------------------------
+
+export const getBillingAlertTool = tool({
+  description: "Fetch the billing alert that triggered this investigation.",
+  inputSchema: z.object({
+    alertId: z.string().describe("e.g. alert_cost_spike_2026_06_15"),
+  }),
+  execute: async ({ alertId }) => ({
+    alertId,
+    triggeredAt: "2026-06-15T08:00:00Z",
+    threshold: "30% day-over-day increase",
+    actual: "61% increase",
+    period: "2026-06-14T00:00:00Z / 2026-06-14T23:59:59Z",
+    totalSpend: { yesterday: 4820, dayBefore: 2990, currency: "USD" },
+    topLineMessage: "Yesterday's cloud spend was $4,820 — $1,830 above the 30% alert threshold.",
+  }),
+});
+
+export const listServiceCostsTool = tool({
+  description: "Break down yesterday's cloud spend by service.",
+  inputSchema: z.object({ date: z.string().describe("ISO date, e.g. 2026-06-14") }),
+  execute: async ({ date }) => ({
+    date,
+    services: [
+      { service: "ml-inference", spend: 2940, prevDaySpend: 310, change: "+848%" },
+      { service: "api-gateway", spend: 610, prevDaySpend: 590, change: "+3%" },
+      { service: "data-warehouse", spend: 820, prevDaySpend: 790, change: "+4%" },
+      { service: "cdn", spend: 450, prevDaySpend: 440, change: "+2%" },
+    ],
+  }),
+});
+
+export const getComputeResourcesTool = tool({
+  description: "List running compute instances for a service.",
+  inputSchema: z.object({ service: z.string() }),
+  execute: async ({ service }) => ({
+    service,
+    instances: service === "ml-inference"
+      ? Array.from({ length: 48 }, (_, i) => ({
+          id: `gpu-${i.toString().padStart(3, "0")}`,
+          type: "a100-80gb",
+          state: "running",
+          launchedAt: "2026-06-13T18:02:00Z",
+          utilizationPct: i < 4 ? 72 : 0,
+          costPerHourUSD: 3.67,
+        }))
+      : [],
+    note:
+      service === "ml-inference"
+        ? "48 A100 instances launched Friday evening. 44 are idle (0% utilization) — training job completed Saturday at 02:14 but instances were never terminated."
+        : "No anomalous instances found.",
+  }),
+});
+
+export const costSpikeTools = {
+  get_billing_alert: getBillingAlertTool,
+  list_service_costs: listServiceCostsTool,
+  get_compute_resources: getComputeResourcesTool,
+};
+
+// ---------------------------------------------------------------------------
+// Slow query tools
+// ---------------------------------------------------------------------------
+
+export const getSlowQueriesReport = tool({
+  description: "Fetch the top slow queries from the database slow-query log.",
+  inputSchema: z.object({
+    since: z.string().describe("ISO timestamp, e.g. 2026-06-15T00:00:00Z"),
+    limit: z.number().int().min(1).max(10).default(5),
+  }),
+  execute: async ({ since, limit }) => ({
+    since,
+    queries: [
+      {
+        queryId: "q_8f2a",
+        avgDurationMs: 4200,
+        callsPerMin: 18,
+        query: "SELECT * FROM user_events WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50",
+        table: "user_events",
+      },
+      {
+        queryId: "q_3c91",
+        avgDurationMs: 890,
+        callsPerMin: 4,
+        query: "SELECT COUNT(*) FROM orders WHERE status = $1 AND created_at > $2",
+        table: "orders",
+      },
+      ...Array.from({ length: Math.max(0, Math.min(limit, 5) - 2) }, (_, i) => ({
+        queryId: `q_${(i + 10).toString(16)}aa`,
+        avgDurationMs: 200 - i * 30,
+        callsPerMin: 1,
+        query: `SELECT id FROM table_${i} WHERE col = $1`,
+        table: `table_${i}`,
+      })),
+    ].slice(0, limit),
+  }),
+});
+
+export const explainQueryTool = tool({
+  description: "Run EXPLAIN ANALYZE on a query ID to get the execution plan.",
+  inputSchema: z.object({ queryId: z.string() }),
+  execute: async ({ queryId }) => {
+    if (queryId === "q_8f2a") {
+      return {
+        queryId,
+        planType: "Seq Scan",
+        table: "user_events",
+        rowsEstimated: 8_340_000,
+        rowsActual: 8_340_000,
+        costMs: 4187,
+        planNote:
+          "Sequential scan on user_events (8.3 M rows). No index satisfies the user_id filter. Full table scan on every call.",
+        suggestedIndex: "CREATE INDEX CONCURRENTLY idx_user_events_user_id ON user_events (user_id, created_at DESC);",
+      };
+    }
+    return { queryId, planType: "Index Scan", costMs: 42, planNote: "Efficient — uses existing index." };
+  },
+});
+
+export const getTableIndexesTool = tool({
+  description: "List existing indexes for a database table.",
+  inputSchema: z.object({ table: z.string() }),
+  execute: async ({ table }) => {
+    if (table === "user_events") {
+      return {
+        table,
+        rowCount: 8_340_000,
+        sizeGb: 12.4,
+        indexes: [
+          { name: "user_events_pkey", columns: ["id"], type: "btree", unique: true },
+        ],
+        note: "Only a primary-key index exists. No index on user_id or created_at.",
+      };
+    }
+    return { table, rowCount: 0, sizeGb: 0, indexes: [] };
+  },
+});
+
+export const slowQueryTools = {
+  get_slow_queries: getSlowQueriesReport,
+  explain_query: explainQueryTool,
+  get_table_indexes: getTableIndexesTool,
+};
