@@ -5,6 +5,9 @@ import { createClaudeCode } from '@ai-sdk/harness-claude-code';
 import { createCodex } from '@ai-sdk/harness-codex';
 import { HarnessAgent } from '@ai-sdk/harness/agent';
 import type { HarnessAgentAdapter } from '@ai-sdk/harness/agent';
+import { SpanStatusCode, trace } from '@opentelemetry/api';
+import { registerOTel, aiSdkIntegration } from '@rawtree/otel';
+import type { RawTreeOtelHandle } from '@rawtree/otel';
 import { scenarios } from '../../../src/scenarios';
 import { createLocalSandboxProvider } from '../../../src/local-sandbox';
 import type { BenchmarkScenario } from '../../../src/types';
@@ -13,6 +16,7 @@ interface RunConfig {
   anthropicKey: string;
   openaiKey: string;
   gatewayKey: string;
+  rawtreeKey: string;
   claudeModel: string;
   codexModel: string;
   useClaudeCode: boolean;
@@ -30,6 +34,7 @@ type SSEEvent =
   | { type: 'case-start'; harness: string; model: string; scenario: string }
   | { type: 'output'; text: string }
   | { type: 'result'; result: BenchmarkResult }
+  | { type: 'rawtree-done' }
   | { type: 'done' }
   | { type: 'error'; message: string };
 
@@ -49,22 +54,22 @@ interface BenchmarkResult {
 
 export async function POST(request: Request): Promise<Response> {
   const config = (await request.json()) as RunConfig;
-
   const encoder = new TextEncoder();
 
   const stream = new ReadableStream({
     async start(controller) {
       const send = (event: SSEEvent) => {
-        const chunk = `data: ${JSON.stringify(event)}\n\n`;
-        controller.enqueue(encoder.encode(chunk));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
       };
 
+      let rawtreeHandle: RawTreeOtelHandle | null = null;
+
       try {
+        // ── Validate ────────────────────────────────────────────────────────
         const harnesses = buildHarnesses(config);
         if (harnesses.length === 0) {
           send({ type: 'error', message: 'No harnesses configured. Check your API keys.' });
           send({ type: 'done' });
-          controller.close();
           return;
         }
 
@@ -74,12 +79,25 @@ export async function POST(request: Request): Promise<Response> {
         if (selectedScenarios.length === 0) {
           send({ type: 'error', message: 'No scenarios selected.' });
           send({ type: 'done' });
-          controller.close();
           return;
         }
 
+        // ── Register RawTree OTel ────────────────────────────────────────────
+        if (config.rawtreeKey) {
+          rawtreeHandle = registerOTel({
+            apiKey: config.rawtreeKey,
+            serviceName: 'harness-bench',
+            environment: 'production',
+            integrations: [aiSdkIntegration()],
+            forceRegisterProvider: true,
+            unregisterOnShutdown: true,
+          });
+        }
+
+        const tracer = trace.getTracer('harness-bench');
         const sandboxProvider = createLocalSandboxProvider();
 
+        // ── Run matrix ───────────────────────────────────────────────────────
         for (const scenario of selectedScenarios) {
           for (const harness of harnesses) {
             send({
@@ -89,9 +107,15 @@ export async function POST(request: Request): Promise<Response> {
               scenario: scenario.id,
             });
 
-            const result = await runCase(harness, scenario, sandboxProvider, send);
+            const result = await runCaseInSpan(tracer, harness, scenario, sandboxProvider, send);
             send({ type: 'result', result });
           }
+        }
+
+        // ── Flush traces ─────────────────────────────────────────────────────
+        if (rawtreeHandle) {
+          await rawtreeHandle.shutdown();
+          send({ type: 'rawtree-done' });
         }
 
         send({ type: 'done' });
@@ -99,6 +123,10 @@ export async function POST(request: Request): Promise<Response> {
         send({ type: 'error', message: String(err) });
         send({ type: 'done' });
       } finally {
+        // Ensure shutdown even on unexpected errors
+        if (rawtreeHandle) {
+          await rawtreeHandle.shutdown().catch(() => {});
+        }
         controller.close();
       }
     },
@@ -113,6 +141,8 @@ export async function POST(request: Request): Promise<Response> {
     },
   });
 }
+
+// ── Harness builder ──────────────────────────────────────────────────────────
 
 function buildHarnesses(config: RunConfig): HarnessEntry[] {
   const harnesses: HarnessEntry[] = [];
@@ -163,49 +193,83 @@ function buildHarnesses(config: RunConfig): HarnessEntry[] {
   return harnesses;
 }
 
-async function runCase(
+// ── Runner ───────────────────────────────────────────────────────────────────
+
+async function runCaseInSpan(
+  tracer: ReturnType<typeof trace.getTracer>,
   harness: HarnessEntry,
   scenario: BenchmarkScenario,
   sandboxProvider: ReturnType<typeof createLocalSandboxProvider>,
   send: (e: SSEEvent) => void,
 ): Promise<BenchmarkResult> {
-  const start = Date.now();
+  return tracer.startActiveSpan('eval.grade', async (span) => {
+    span.setAttribute('scenario', scenario.id);
+    span.setAttribute('harness', harness.name);
+    span.setAttribute('model', harness.model);
+    span.setAttribute('sandbox', 'local-node');
 
-  const agent = new HarnessAgent({
-    id: harness.name,
-    harness: harness.adapter,
-    sandbox: sandboxProvider,
-    tools: scenario.tools,
-    instructions: scenario.instructions,
-    telemetry: { recordInputs: false, recordOutputs: false, functionId: harness.name },
-  });
+    const start = Date.now();
 
-  const session = await agent.createSession();
-  try {
-    const result = await agent.generate({ session, prompt: scenario.prompt });
+    try {
+      const agent = new HarnessAgent({
+        id: harness.name,
+        harness: harness.adapter,
+        sandbox: sandboxProvider,
+        tools: scenario.tools,
+        instructions: scenario.instructions,
+        telemetry: { recordInputs: true, recordOutputs: true, functionId: harness.name },
+      });
 
-    if (result.text) {
-      send({ type: 'output', text: result.text });
+      const session = await agent.createSession();
+      let result: BenchmarkResult;
+
+      try {
+        const agentResult = await agent.generate({ session, prompt: scenario.prompt });
+
+        if (agentResult.text) {
+          send({ type: 'output', text: agentResult.text });
+        }
+
+        const steps = agentResult.steps ?? [];
+        const toolCalls = steps.reduce(
+          (n: number, s: { toolCalls?: unknown[] }) => n + (s.toolCalls?.length ?? 0),
+          0,
+        );
+        const passed = scenario.grade(agentResult.text);
+
+        result = {
+          scenario: scenario.id,
+          harness: harness.name,
+          model: harness.model,
+          sandbox: 'local-node',
+          passed,
+          steps: steps.length,
+          toolCalls,
+          inputTokens: agentResult.usage?.inputTokens ?? 0,
+          outputTokens: agentResult.usage?.outputTokens ?? 0,
+          durationMs: Date.now() - start,
+          text: agentResult.text,
+        };
+      } finally {
+        await session.destroy().catch(() => {});
+      }
+
+      span.setAttribute('passed', result.passed);
+      span.setAttribute('tool_calls', result.toolCalls);
+      span.setAttribute('steps', result.steps);
+      span.setAttribute('model_calls', result.steps);
+      span.setAttribute('input_tokens', result.inputTokens);
+      span.setAttribute('output_tokens', result.outputTokens);
+      span.setAttribute('duration_ms', result.durationMs);
+      span.setStatus({ code: result.passed ? SpanStatusCode.OK : SpanStatusCode.ERROR });
+
+      return result;
+    } catch (error) {
+      span.setStatus({ code: SpanStatusCode.ERROR, message: String(error) });
+      span.recordException(error as Error);
+      throw error;
+    } finally {
+      span.end();
     }
-
-    const steps = result.steps ?? [];
-    const toolCalls = steps.reduce((n: number, s: { toolCalls?: unknown[] }) => n + (s.toolCalls?.length ?? 0), 0);
-    const passed = scenario.grade(result.text);
-
-    return {
-      scenario: scenario.id,
-      harness: harness.name,
-      model: harness.model,
-      sandbox: 'local-node',
-      passed,
-      steps: steps.length,
-      toolCalls,
-      inputTokens: result.usage?.inputTokens ?? 0,
-      outputTokens: result.usage?.outputTokens ?? 0,
-      durationMs: Date.now() - start,
-      text: result.text,
-    };
-  } finally {
-    await session.destroy().catch(() => {});
-  }
+  });
 }

@@ -8,6 +8,7 @@ interface RunConfig {
   anthropicKey: string;
   openaiKey: string;
   gatewayKey: string;
+  rawtreeKey: string;
   claudeModel: string;
   codexModel: string;
   useClaudeCode: boolean;
@@ -39,6 +40,7 @@ type SSEEvent =
   | { type: 'case-start'; harness: string; model: string; scenario: string }
   | { type: 'output'; text: string }
   | { type: 'result'; result: BenchmarkResult }
+  | { type: 'rawtree-done' }
   | { type: 'done' }
   | { type: 'error'; message: string };
 
@@ -81,6 +83,7 @@ function defaultConfig(): RunConfig {
     anthropicKey: '',
     openaiKey: '',
     gatewayKey: '',
+    rawtreeKey: '',
     claudeModel: 'claude-sonnet-4-6',
     codexModel: 'o4-mini',
     useClaudeCode: true,
@@ -290,6 +293,7 @@ export default function BenchmarkPage() {
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [results, setResults] = useState<BenchmarkResult[]>([]);
+  const [tracesUploaded, setTracesUploaded] = useState(false);
   const [runCount, setRunCount] = useState(0);
   const logEndRef = useRef<HTMLDivElement>(null);
 
@@ -335,6 +339,7 @@ export default function BenchmarkPage() {
     setRunning(true);
     setLogs([]);
     setResults([]);
+    setTracesUploaded(false);
     setRunCount((n) => n + 1);
 
     addLog('info', '─── Starting benchmark run ───');
@@ -383,7 +388,10 @@ export default function BenchmarkPage() {
                 'info',
                 `Done — ${event.result.steps} steps, ${event.result.toolCalls} tool calls, ${event.result.durationMs}ms, ${event.result.passed ? '✓ pass' : '✗ fail'}`,
               );
-            } else if (event.type === 'error') {
+            } else if (event.type === 'rawtree-done') {
+                setTracesUploaded(true);
+                addLog('info', '↑ Traces flushed to RawTree');
+              } else if (event.type === 'error') {
               addLog('error', `Error: ${event.message}`);
             } else if (event.type === 'done') {
               addLog('info', '\n─── Run complete ───');
@@ -464,6 +472,20 @@ export default function BenchmarkPage() {
                 onChange={(v) => update('gatewayKey', v)}
                 placeholder="vck_…"
               />
+
+              <div className="border-t border-[var(--border)] pt-4 space-y-1.5">
+                <KeyField
+                  label="RawTree API Key"
+                  badge="optional"
+                  value={config.rawtreeKey}
+                  onChange={(v) => update('rawtreeKey', v)}
+                  placeholder="rt_…"
+                />
+                <p className="text-xs text-[var(--text-muted)] leading-relaxed pt-0.5">
+                  Benchmark traces are automatically indexed in your RawTree project.
+                  No tables to create — just add your key.
+                </p>
+              </div>
             </div>
           </Section>
 
@@ -638,6 +660,23 @@ export default function BenchmarkPage() {
                   <p className="px-4 py-2 text-[10px] text-[var(--text-muted)]">
                     Click a row to expand the agent output
                   </p>
+                </div>
+              )}
+
+              {/* RawTree callout */}
+              {tracesUploaded && (
+                <div className="border-t border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-start gap-3">
+                  <span className="text-emerald-400 text-base mt-0.5">↑</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-emerald-400 font-semibold">
+                      Traces indexed in your RawTree project
+                    </p>
+                    <p className="text-xs text-zinc-500 mt-1 font-mono leading-relaxed">
+                      SELECT scenario, harness, model, passed, input_tokens, output_tokens,
+                      duration_ms FROM traces WHERE name = &apos;eval.grade&apos; ORDER BY
+                      inserted_at DESC
+                    </p>
+                  </div>
                 </div>
               )}
             </>
